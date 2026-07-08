@@ -6,7 +6,7 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-const FUSION_HOST = process.env.FUSION_HOST || 'https://elup-test.fa.em2.oraclecloud.com';
+const FUSION_HOST = process.env.FUSION_HOST || 'https://elup.fa.em2.oraclecloud.com/';
 const FUSION_USER = process.env.FUSION_USER || '';
 const FUSION_PASS = process.env.FUSION_PASS || '';
 const CLIENT_ID = process.env.CLIENT_ID || '';
