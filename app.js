@@ -32,7 +32,7 @@ async function getOAuthToken() {
     params.append('grant_type', 'password');
     params.append('username', FUSION_USER);
     params.append('password', FUSION_PASS);
-    params.append('scope', 'urn:opc:resource:fusion:elup:fusion-ai/');
+   params.append('scope', 'urn:opc:resource:fusion:elup:fusion-ai/');
     const res = await axios.post(TOKEN_URL, params.toString(), {
       auth: { username: CLIENT_ID, password: CLIENT_SECRET },
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
