@@ -9,9 +9,9 @@ app.use(express.json());
 const FUSION_HOST = process.env.FUSION_HOST || 'https://elup.fa.em2.oraclecloud.com/';
 const FUSION_USER = process.env.FUSION_USER || '';
 const FUSION_PASS = process.env.FUSION_PASS || '';
-const CLIENT_ID = process.env.CLIENT_ID || '';
-const CLIENT_SECRET = process.env.CLIENT_SECRET || '';
-const TOKEN_URL = process.env.TOKEN_URL || 'https://idcs-1db6ad5580804382953e5ab516205434.identity.oraclecloud.com/oauth2/v1/token';
+const CLIENT_ID = process.env.CLIENT_ID || 'c9ed61e9eb4e4afe9e27bf91bd6dc738';
+const CLIENT_SECRET = process.env.CLIENT_SECRET || 'idcscs-01ac6cdc-6110-4635-b0a9-f239475ed21e';
+const TOKEN_URL = process.env.TOKEN_URL || 'https://idcs-98e1e16c2ea349b29486184a7ff70b5c.identity.oraclecloud.com/oauth2/v1/token';
 const AGENT_CODE = process.env.AGENT_CODE || 'AR_COLLECTIONS_ASSISTANT';
 const WA_TOKEN = process.env.WA_TOKEN || '';
 const PHONE_ID = process.env.PHONE_ID || '1086132367916692';
@@ -32,7 +32,7 @@ async function getOAuthToken() {
     params.append('grant_type', 'password');
     params.append('username', FUSION_USER);
     params.append('password', FUSION_PASS);
-    params.append('scope', 'urn:opc:resource:fusion:elup-test:fusion-ai/');
+    params.append('scope', 'urn:opc:resource:fusion:elup:fusion-ai/');
     const res = await axios.post(TOKEN_URL, params.toString(), {
       auth: { username: CLIENT_ID, password: CLIENT_SECRET },
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
