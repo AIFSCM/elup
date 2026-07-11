@@ -139,54 +139,55 @@ async function callOracleAgent(userMessage, conversationId) {
   }
 }
 
-async function callDirectAPI(userMessage, conversationId) {
-  try {
-    var msg = userMessage.toLowerCase();
-    var queryParams = '';
-    var title = 'Latest AP Invoices';
-    if (msg.indexOf('pending') > -1 || msg.indexOf('approval') > -1) {
-      queryParams = 'q=ApprovalStatus=Required';
-      title = 'AP Invoices Pending Approval';
-    } else if (msg.indexOf('unpaid') > -1 || msg.indexOf('outstanding') > -1) {
-      queryParams = 'q=PaidStatus=Unpaid';
-      title = 'Unpaid AP Invoices';
-    } else if (msg.indexOf('cancel') > -1) {
-      queryParams = 'q=ValidationStatus=Canceled';
-      title = 'Canceled AP Invoices';
-    } else if (msg.indexOf('paid') > -1) {
-      queryParams = 'q=PaidStatus=Paid';
-      title = 'Paid AP Invoices';
-    }
-    var url = FUSION_HOST + '/fscmRestApi/resources/11.13.18.05/invoices?limit=5';
-    if (queryParams) {
-      url = url + '&' + queryParams;
-    }
-    var res = await axios.get(url, {
-      auth: { username: FUSION_USER, password: FUSION_PASS }
-    });
-    var invoices = res.data.items || [];
-    if (invoices.length === 0) {
-      return { reply: 'No invoices found.', conversationId: conversationId || null };
-    }
-    var reply = title + '\n\n';
-    for (var i = 0; i < invoices.length; i++) {
-      var inv = invoices[i];
-      reply += (i + 1) + '. Invoice #' + inv.InvoiceNumber + '\n';
-      reply += '   Supplier: ' + inv.Supplier + '\n';
-      reply += '   Amount: ' + inv.InvoiceCurrency + ' ' + inv.InvoiceAmount + '\n';
-      reply += '   Date: ' + inv.InvoiceDate + '\n';
-      reply += '   Status: ' + inv.ValidationStatus + '\n\n';
-    }
-    reply += 'You can ask:\n';
-    reply += '- Show pending approval invoices\n';
-    reply += '- Show unpaid invoices\n';
-    reply += '- Show latest invoices\n';
-    return { reply: reply, conversationId: conversationId || null };
-  } catch (err) {
-    console.error('Direct API error: ' + err.message);
-    return { reply: 'Error connecting to Oracle. Please try again.', conversationId: conversationId || null };
-  }
-}
+// async function callDirectAPI(userMessage, conversationId) 
+//{
+//  try {
+//    var msg = userMessage.toLowerCase();
+//    var queryParams = '';
+//    var title = 'Latest AP Invoices';
+//    if (msg.indexOf('pending') > -1 || msg.indexOf('approval') > -1) {
+//     queryParams = 'q=ApprovalStatus=Required';
+//     title = 'AP Invoices Pending Approval';
+//    } else if (msg.indexOf('unpaid') > -1 || msg.indexOf('outstanding') > -1) {
+//      queryParams = 'q=PaidStatus=Unpaid';
+//      title = 'Unpaid AP Invoices';
+//    } else if (msg.indexOf('cancel') > -1) {
+//      queryParams = 'q=ValidationStatus=Canceled';
+//      title = 'Canceled AP Invoices';
+//    } else if (msg.indexOf('paid') > -1) {
+//      queryParams = 'q=PaidStatus=Paid';
+//      title = 'Paid AP Invoices';
+//    }
+//    var url = FUSION_HOST + '/fscmRestApi/resources/11.13.18.05/invoices?limit=5';
+//    if (queryParams) {
+//      url = url + '&' + queryParams;
+//    }
+//    var res = await axios.get(url, {
+//      auth: { username: FUSION_USER, password: FUSION_PASS }
+//    });
+ //   var invoices = res.data.items || [];
+ //   if (invoices.length === 0) {
+ //     return { reply: 'No invoices found.', conversationId: conversationId || null };
+ //   }
+ //   var reply = title + '\n\n';
+ //   for (var i = 0; i < invoices.length; i++) {
+ //     var inv = invoices[i];
+ //     reply += (i + 1) + '. Invoice #' + inv.InvoiceNumber + '\n';
+ //     reply += '   Supplier: ' + inv.Supplier + '\n';
+ //     reply += '   Amount: ' + inv.InvoiceCurrency + ' ' + inv.InvoiceAmount + '\n';
+ //     reply += '   Date: ' + inv.InvoiceDate + '\n';
+ //     reply += '   Status: ' + inv.ValidationStatus + '\n\n';
+ //   }
+ //   reply += 'You can ask:\n';
+ //   reply += '- Show pending approval invoices\n';
+ //   reply += '- Show unpaid invoices\n';
+ //   reply += '- Show latest invoices\n';
+ //   return { reply: reply, conversationId: conversationId || null };
+ // } catch (err) {
+//    console.error('Direct API error: ' + err.message);
+//    return { reply: 'Error connecting to Oracle. Please try again.', conversationId: conversationId || null };
+//  }
+//}
 
 async function sendWhatsApp(to, text) {
   try {
