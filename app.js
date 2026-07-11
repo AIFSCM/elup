@@ -6,7 +6,8 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-const FUSION_HOST = process.env.FUSION_HOST || 'https://elup.fa.em2.oraclecloud.com/';
+const FUSION_HOST_RAW = process.env.FUSION_HOST || 'https://elup.fa.em2.oraclecloud.com/';
+const FUSION_HOST = FUSION_HOST_RAW.replace(/\/+$/, ''); // strip trailing slash(es) to avoid double-slash URLs
 const FUSION_USER = process.env.FUSION_USER || '';
 const FUSION_PASS = process.env.FUSION_PASS || '';
 const CLIENT_ID = process.env.CLIENT_ID || '';
@@ -19,7 +20,33 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'mySecret123';
 
 let cachedToken = null;
 let tokenExpiresAt = 0;
+
+// sessions[phone] = { conversationId, lastCustomer, lastActive }
 const sessions = {};
+const SESSION_TTL_MS = 45 * 60 * 1000; // 45 min inactivity -> auto reset
+
+// Very lightweight customer-name extractor.
+// Looks for capitalized multi-word phrases ending in common company suffixes,
+// e.g. "Al Shaheer Corporation (Private) Limited", "ABC Traders Pvt Ltd".
+// Falls back to null if nothing matches (session customer stays unchanged).
+function extractCustomerHint(text) {
+  if (!text) return null;
+  var suffixPattern = /([A-Z][A-Za-z&.\-]*(?:\s+[A-Z][A-Za-z&.\-]*){0,5}\s+(?:Corporation|Corp|Company|Co\.?|Limited|Ltd\.?|Pvt\.?|Private|Industries|Traders|Enterprises|Group|Inc\.?))(?:\s*\([^)]*\))?/;
+  var match = text.match(suffixPattern);
+  if (match) return match[1].trim().toLowerCase();
+  return null;
+}
+
+function getSession(phone) {
+  var s = sessions[phone];
+  if (!s) return null;
+  if (Date.now() - s.lastActive > SESSION_TTL_MS) {
+    console.log('Session expired for ' + phone + ' (TTL)');
+    delete sessions[phone];
+    return null;
+  }
+  return s;
+}
 
 async function getOAuthToken() {
   try {
@@ -92,14 +119,14 @@ async function callOracleAgent(userMessage, conversationId) {
         return { reply: 'Sorry, the agent failed to process your request.', conversationId: convId };
       }
     }
-    return { reply: 'Agent is taking too long. Please try again.', conversationId: null };
+    return { reply: 'Agent is taking too long. Please try again.', conversationId: conversationId || null };
   } catch (err) {
     console.error('Agent error: ' + JSON.stringify(err.response ? err.response.data : err.message));
-    return callDirectAPI(userMessage);
+    return callDirectAPI(userMessage, conversationId);
   }
 }
 
-async function callDirectAPI(userMessage) {
+async function callDirectAPI(userMessage, conversationId) {
   try {
     var msg = userMessage.toLowerCase();
     var queryParams = '';
@@ -126,7 +153,7 @@ async function callDirectAPI(userMessage) {
     });
     var invoices = res.data.items || [];
     if (invoices.length === 0) {
-      return { reply: 'No invoices found.', conversationId: null };
+      return { reply: 'No invoices found.', conversationId: conversationId || null };
     }
     var reply = title + '\n\n';
     for (var i = 0; i < invoices.length; i++) {
@@ -141,10 +168,10 @@ async function callDirectAPI(userMessage) {
     reply += '- Show pending approval invoices\n';
     reply += '- Show unpaid invoices\n';
     reply += '- Show latest invoices\n';
-    return { reply: reply, conversationId: null };
+    return { reply: reply, conversationId: conversationId || null };
   } catch (err) {
     console.error('Direct API error: ' + err.message);
-    return { reply: 'Error connecting to Oracle. Please try again.', conversationId: null };
+    return { reply: 'Error connecting to Oracle. Please try again.', conversationId: conversationId || null };
   }
 }
 
@@ -190,6 +217,10 @@ app.get('/debug', function(req, res) {
   });
 });
 
+app.get('/sessions', function(req, res) {
+  res.json(sessions);
+});
+
 app.get('/webhook', function(req, res) {
   var mode = req.query['hub.mode'];
   var token = req.query['hub.verify_token'];
@@ -213,11 +244,33 @@ app.post('/webhook', async function(req, res) {
     if (!message || message.type !== 'text') return;
     var userPhone = message.from;
     var userText = message.text.body;
-    var convId = sessions[userPhone] || null;
     console.log('Message from ' + userPhone + ': ' + userText);
+
+    var session = getSession(userPhone);
+    var detectedCustomer = extractCustomerHint(userText);
+    var convIdToSend = null;
+
+    if (session) {
+      if (detectedCustomer && session.lastCustomer && detectedCustomer !== session.lastCustomer) {
+        // Customer changed mid-thread -> force a fresh agent session
+        console.log('Customer switch detected for ' + userPhone + ': "' + session.lastCustomer + '" -> "' + detectedCustomer + '". Resetting context.');
+        convIdToSend = null;
+      } else {
+        // Same customer (or no new customer mentioned) -> keep the thread going
+        convIdToSend = session.conversationId;
+      }
+    }
+
     await sendWhatsApp(userPhone, 'Processing your request, please wait...');
-    var result = await callOracleAgent(userText, convId);
-    sessions[userPhone] = result.conversationId;
+    var result = await callOracleAgent(userText, convIdToSend);
+
+    sessions[userPhone] = {
+      conversationId: result.conversationId || null,
+      // keep prior customer if this message didn't mention one; otherwise update it
+      lastCustomer: detectedCustomer || (session ? session.lastCustomer : null),
+      lastActive: Date.now()
+    };
+
     await sendWhatsApp(userPhone, result.reply);
   } catch (e) {
     console.error('Webhook error: ' + e.message);
