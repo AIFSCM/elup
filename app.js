@@ -59,7 +59,7 @@ async function getOAuthToken() {
     params.append('grant_type', 'password');
     params.append('username', FUSION_USER);
     params.append('password', FUSION_PASS);
-   params.append('scope', 'urn:opc:resource:fusion:elup:fusion-ai/');
+    params.append('scope', 'urn:opc:resource:fusion:elup:fusion-ai/');
     const res = await axios.post(TOKEN_URL, params.toString(), {
       auth: { username: CLIENT_ID, password: CLIENT_SECRET },
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
@@ -77,18 +77,27 @@ async function getOAuthToken() {
 async function callOracleAgent(userMessage, conversationId) {
   try {
     var token = await getOAuthToken();
-    var body = { message: userMessage };
-    if (conversationId) {
-      body.conversationId = conversationId;
-    }
+
+    // FIX: "conversational" must be explicitly set to true, or Oracle treats every
+    // call as a stateless one-shot request and never issues/honors a conversationId.
+    // conversationId must be sent as null (not omitted) to start a fresh session,
+    // and as the previous value to continue one.
+    var body = {
+      message: userMessage,
+      conversational: true,
+      conversationId: conversationId || null
+    };
+
     var invokeURL = FUSION_HOST + '/api/fusion-ai/orchestrator/agent/v2/' + AGENT_CODE + '/invokeAsync';
     console.log('Calling invokeAsync: ' + invokeURL);
+    console.log('Request body: ' + JSON.stringify(body));
     var invokeRes = await axios.post(invokeURL, body, {
       headers: {
         'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json'
       }
     });
+    console.log('invokeAsync raw response: ' + JSON.stringify(invokeRes.data));
     var jobId = invokeRes.data.jobId;
     var convId = invokeRes.data.conversationId;
     console.log('Job ID: ' + jobId);
@@ -111,12 +120,16 @@ async function callOracleAgent(userMessage, conversationId) {
         } else {
           reply = 'Request completed but no response text found.';
         }
+        // FIX: prefer the conversationId from the COMPLETE status payload
+        // (most authoritative), fall back to the one returned by invokeAsync.
+        var finalConvId = statusRes.data.conversationId || convId || null;
         console.log('Agent reply: ' + reply);
-        return { reply: reply, conversationId: convId };
+        console.log('Resolved conversationId for this turn: ' + finalConvId);
+        return { reply: reply, conversationId: finalConvId };
       }
       if (status === 'FAILED' || status === 'ERROR') {
         console.error('Agent failed: ' + JSON.stringify(statusRes.data));
-        return { reply: 'Sorry, the agent failed to process your request.', conversationId: convId };
+        return { reply: 'Sorry, the agent failed to process your request.', conversationId: convId || conversationId || null };
       }
     }
     return { reply: 'Agent is taking too long. Please try again.', conversationId: conversationId || null };
@@ -261,6 +274,8 @@ app.post('/webhook', async function(req, res) {
       }
     }
 
+    console.log('conversationId being sent for this turn: ' + convIdToSend);
+
     await sendWhatsApp(userPhone, 'Processing your request, please wait...');
     var result = await callOracleAgent(userText, convIdToSend);
 
@@ -270,6 +285,8 @@ app.post('/webhook', async function(req, res) {
       lastCustomer: detectedCustomer || (session ? session.lastCustomer : null),
       lastActive: Date.now()
     };
+
+    console.log('conversationId stored after this turn: ' + sessions[userPhone].conversationId);
 
     await sendWhatsApp(userPhone, result.reply);
   } catch (e) {
