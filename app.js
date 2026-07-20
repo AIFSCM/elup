@@ -18,6 +18,25 @@ const WA_TOKEN = process.env.WA_TOKEN || '';
 const PHONE_ID = process.env.PHONE_ID || '1086132367916692';
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'mySecret123';
 
+// ALLOWLIST: comma-separated WhatsApp numbers permitted to use this agent.
+// Format must match message.from exactly as WhatsApp sends it (digits only,
+// country code, no "+", no spaces) e.g. ALLOWED_NUMBERS=923004188817,923001234567
+const ALLOWED_NUMBERS = (process.env.ALLOWED_NUMBERS || '')
+  .split(',')
+  .map(function(n) { return n.trim(); })
+  .filter(Boolean);
+
+// FAIL-CLOSED: if ALLOWED_NUMBERS is empty/unset, NO ONE is allowed through.
+// This is deliberate since this is an access-control feature -- set the env
+// var before going live, or every message will be silently blocked.
+function isAllowedNumber(phone) {
+  if (ALLOWED_NUMBERS.length === 0) {
+    console.warn('ALLOWED_NUMBERS is empty -- blocking ALL numbers until it is set');
+    return false;
+  }
+  return ALLOWED_NUMBERS.indexOf(phone) !== -1;
+}
+
 let cachedToken = null;
 let tokenExpiresAt = 0;
 
@@ -78,7 +97,7 @@ async function callOracleAgent(userMessage, conversationId) {
   try {
     var token = await getOAuthToken();
 
-    // FIX: "conversational" must be explicitly set to true, or Oracle treats every
+    // "conversational" must be explicitly set to true, or Oracle treats every
     // call as a stateless one-shot request and never issues/honors a conversationId.
     // conversationId must be sent as null (not omitted) to start a fresh session,
     // and as the previous value to continue one.
@@ -120,7 +139,7 @@ async function callOracleAgent(userMessage, conversationId) {
         } else {
           reply = 'Request completed but no response text found.';
         }
-        // FIX: prefer the conversationId from the COMPLETE status payload
+        // Prefer the conversationId from the COMPLETE status payload
         // (most authoritative), fall back to the one returned by invokeAsync.
         var finalConvId = statusRes.data.conversationId || convId || null;
         console.log('Agent reply: ' + reply);
@@ -135,59 +154,14 @@ async function callOracleAgent(userMessage, conversationId) {
     return { reply: 'Agent is taking too long. Please try again.', conversationId: conversationId || null };
   } catch (err) {
     console.error('Agent error: ' + JSON.stringify(err.response ? err.response.data : err.message));
-    return callDirectAPI(userMessage, conversationId);
+    // callDirectAPI fallback has been removed/disabled -- return a plain
+    // error message instead of crashing on a call to a missing function.
+    return {
+      reply: 'Sorry, something went wrong connecting to Oracle. Please try again shortly.',
+      conversationId: conversationId || null
+    };
   }
 }
-
-// async function callDirectAPI(userMessage, conversationId) 
-//{
-//  try {
-//    var msg = userMessage.toLowerCase();
-//    var queryParams = '';
-//    var title = 'Latest AP Invoices';
-//    if (msg.indexOf('pending') > -1 || msg.indexOf('approval') > -1) {
-//     queryParams = 'q=ApprovalStatus=Required';
-//     title = 'AP Invoices Pending Approval';
-//    } else if (msg.indexOf('unpaid') > -1 || msg.indexOf('outstanding') > -1) {
-//      queryParams = 'q=PaidStatus=Unpaid';
-//      title = 'Unpaid AP Invoices';
-//    } else if (msg.indexOf('cancel') > -1) {
-//      queryParams = 'q=ValidationStatus=Canceled';
-//      title = 'Canceled AP Invoices';
-//    } else if (msg.indexOf('paid') > -1) {
-//      queryParams = 'q=PaidStatus=Paid';
-//      title = 'Paid AP Invoices';
-//    }
-//    var url = FUSION_HOST + '/fscmRestApi/resources/11.13.18.05/invoices?limit=5';
-//    if (queryParams) {
-//      url = url + '&' + queryParams;
-//    }
-//    var res = await axios.get(url, {
-//      auth: { username: FUSION_USER, password: FUSION_PASS }
-//    });
- //   var invoices = res.data.items || [];
- //   if (invoices.length === 0) {
- //     return { reply: 'No invoices found.', conversationId: conversationId || null };
- //   }
- //   var reply = title + '\n\n';
- //   for (var i = 0; i < invoices.length; i++) {
- //     var inv = invoices[i];
- //     reply += (i + 1) + '. Invoice #' + inv.InvoiceNumber + '\n';
- //     reply += '   Supplier: ' + inv.Supplier + '\n';
- //     reply += '   Amount: ' + inv.InvoiceCurrency + ' ' + inv.InvoiceAmount + '\n';
- //     reply += '   Date: ' + inv.InvoiceDate + '\n';
- //     reply += '   Status: ' + inv.ValidationStatus + '\n\n';
- //   }
- //   reply += 'You can ask:\n';
- //   reply += '- Show pending approval invoices\n';
- //   reply += '- Show unpaid invoices\n';
- //   reply += '- Show latest invoices\n';
- //   return { reply: reply, conversationId: conversationId || null };
- // } catch (err) {
-//    console.error('Direct API error: ' + err.message);
-//    return { reply: 'Error connecting to Oracle. Please try again.', conversationId: conversationId || null };
-//  }
-//}
 
 async function sendWhatsApp(to, text) {
   try {
@@ -227,7 +201,9 @@ app.get('/debug', function(req, res) {
     FUSION_PASS: FUSION_PASS ? 'SET' : 'NOT SET',
     WA_TOKEN: WA_TOKEN ? 'SET' : 'NOT SET',
     PHONE_ID: PHONE_ID,
-    VERIFY_TOKEN: VERIFY_TOKEN ? 'SET' : 'NOT SET'
+    VERIFY_TOKEN: VERIFY_TOKEN ? 'SET' : 'NOT SET',
+    ALLOWED_NUMBERS_COUNT: ALLOWED_NUMBERS.length,
+    ALLOWED_NUMBERS: ALLOWED_NUMBERS // remove this line if you don't want numbers visible via /debug
   });
 });
 
@@ -258,6 +234,14 @@ app.post('/webhook', async function(req, res) {
     if (!message || message.type !== 'text') return;
     var userPhone = message.from;
     var userText = message.text.body;
+
+    // ALLOWLIST CHECK -- must happen before any processing, logging of
+    // content, session lookup, or Oracle call.
+    if (!isAllowedNumber(userPhone)) {
+      console.log('Blocked message from unauthorized number: ' + userPhone);
+      return; // silently ignore -- no reply sent, no Oracle call made
+    }
+
     console.log('Message from ' + userPhone + ': ' + userText);
 
     var session = getSession(userPhone);
@@ -304,4 +288,8 @@ app.listen(PORT, function() {
   console.log('FUSION_USER: ' + (FUSION_USER ? 'SET' : 'NOT SET'));
   console.log('WA_TOKEN set: ' + !!WA_TOKEN);
   console.log('PHONE_ID: ' + PHONE_ID);
+  console.log('ALLOWED_NUMBERS configured: ' + ALLOWED_NUMBERS.length + ' number(s)');
+  if (ALLOWED_NUMBERS.length === 0) {
+    console.warn('WARNING: ALLOWED_NUMBERS is not set -- ALL incoming messages will be blocked.');
+  }
 });
